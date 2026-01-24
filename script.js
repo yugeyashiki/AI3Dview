@@ -1,4 +1,5 @@
-
+console.log("FIX: ONLY Hips rotated 180. Global/Leg rotations REMOVED.");
+console.log("--- SCRIPT.JS LOADED (VERSION: HIPS_ONLY_FIX) ---");
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
@@ -18,6 +19,12 @@ let currentVrm = null;
 let mixer = null;
 let clock = new THREE.Clock();
 let gridRoom = null;
+// hologramStage removed entirely
+let vrmLoaded = false;
+let frameCount = 0;
+let renderLogDone = false;
+let boxHelper = null;
+let scaleLogDone = false;
 
 // --- MediaPipe ---
 let faceMesh;
@@ -27,20 +34,49 @@ const videoElement = document.getElementById('input_video');
 
 // --- Init ---
 function init() {
+    // 1. Scene Creation
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    // 【Lighting for Texture Recovery】
+    const light = new THREE.DirectionalLight(0xffffff, 1.0);
+    light.position.set(0, 1.0, 1.0);
+    scene.add(light);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+
+    // 【生存確認】赤いキューブ -> REMOVED
+    // const testGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    // const testMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    // const testMesh = new THREE.Mesh(testGeo, testMat);
+    // testMesh.position.set(0, 1.0, 0); // Head height
+    // scene.add(testMesh); // REMOVED
+
+    // 3. Diagnostic help at origin -> REMOVED
+    // const originAxes = new THREE.AxesHelper(10);
+    // scene.add(originAxes);
+
+    console.log("Scene Initialized (Cleaned)");
+
     setupThreeJS();
     setupRoom();
+
     loadVRMAndFBX('./VRM/kamuro.vrm', './Motions/dance.fbx');
     setupFaceMesh();
+
+    // 【カメラ固定】 init最後で明示
+    camera.position.set(0, 1.5, 2.5);
+    camera.lookAt(0, 1.0, 0);
+
     animate();
 }
 
 function setupThreeJS() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
-
     // Camera
-    camera = new THREE.PerspectiveCamera(30, ASPECT_RATIO, 0.1, 100.0); // Narrower FOV for deep view
-    camera.position.set(0, 0, DEFAULT_EYE_Z);
+    camera = new THREE.PerspectiveCamera(30, ASPECT_RATIO, 0.1, 1000.0);
+    camera.position.set(0, 0, 5); // Initial setup
+    camera.updateProjectionMatrix();
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -50,24 +86,12 @@ function setupThreeJS() {
 
     document.body.appendChild(renderer.domElement);
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambient);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(2.0, 5.0, 5.0);
-    dirLight.castShadow = true;
-    dirLight.shadow.bias = -0.005;
-    dirLight.shadow.mapSize.width = 4096;
-    dirLight.shadow.mapSize.height = 4096;
-    scene.add(dirLight);
-
     window.addEventListener('resize', onWindowResize, false);
 }
 
 function setupRoom() {
     gridRoom = new THREE.Group();
-    // Floor (Shadow Catcher)
+    // Floor
     const planeGeo = new THREE.PlaneGeometry(50, 50);
     const planeMat = new THREE.ShadowMaterial({ opacity: 0.5, color: 0x000000 });
     const floorMesh = new THREE.Mesh(planeGeo, planeMat);
@@ -101,22 +125,44 @@ function loadVRMAndFBX(vrmUrl, fbxUrl) {
 
         currentVrm = vrm;
 
-        // Position
-        vrm.scene.position.set(0, -0.8, PROJECTION_DIST);
-        vrm.scene.rotation.y = Math.PI;
+        // Force Reset Position/Rotation/Scale (Local to Scene)
+        vrm.scene.position.set(0, 0, 0);
+        vrm.scene.rotation.y = 0; // Rotation Reset
         vrm.scene.scale.set(1, 1, 1);
 
         vrm.scene.traverse((obj) => {
             if (obj.isMesh) {
                 obj.castShadow = true;
                 obj.receiveShadow = false;
+
+                // 【Render Guard】
                 obj.frustumCulled = false;
+                obj.renderOrder = 999;
+
+                // MToon Material is kept securely.
+                // Re-enable skinning if needed? MToon handles it.
+                // We just ensure 'visible = true'
+                obj.visible = true;
+
+                obj.layers.set(0);
             }
         });
 
+        // 【EVIDENCE: DIRECT SCENE ADD】
         scene.add(vrm.scene);
 
+        // Debug Helpers -> REMOVED
+        // boxHelper = new THREE.BoxHelper(vrm.scene, 0xffff00);
+        // scene.add(boxHelper);
+
+        const skeletonHelper = new THREE.SkeletonHelper(vrm.scene);
+        scene.add(skeletonHelper);
+
+        console.log("VRM added directly to SCENE at (0,0,0). Textures RESTORED. Debug objects commented out, Skeleton Visible.");
+
         mixer = new THREE.AnimationMixer(vrm.scene);
+
+        // FBX Loading ENABLED
         loadFBX(fbxUrl);
 
     }, undefined, (err) => console.error("VRM Error:", err));
@@ -169,42 +215,83 @@ const mixamoMap = {
     'mixamorigRightFoot': 'rightFoot', 'RightFoot': 'rightFoot'
 };
 
+// --- Retargeting with Safeguards ---
+// --- Retargeting with Safeguards ---
 function retargetFBX(clip) {
     if (!currentVrm || !mixer) return;
     const tracks = [];
+    let scaledPositionTracks = 0;
 
-    // Standard Retargeting with Root Motion Fix
     clip.tracks.forEach(t => {
         if (!t.name) return;
-        const base = t.name.split('.')[0].replace(/.*:/, '');
+
         const prop = t.name.split('.').pop();
+
+        // 1. Position handling: We no longer delete, but we must map normally.
+        // However, we need to check VRM mapping first.
+
+        const base = t.name.split('.')[0].replace(/.*:/, '');
         const vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base];
 
         if (vrmName) {
             const vrmNode = currentVrm.humanoid.getNormalizedBoneNode(vrmName);
-            if (vrmNode) {
+
+            // Allow both quaternion and position
+            if (vrmNode && (prop === 'quaternion' || prop === 'position')) {
                 const newT = t.clone();
                 newT.name = vrmNode.name + '.' + prop;
 
-                if (prop === 'position' && vrmName === 'hips') {
-                    // Root Motion Fix
-                    for (let i = 0; i < newT.values.length; i += 3) {
-                        newT.values[i] = 0.0;    // X
-                        newT.values[i + 1] *= 0.01; // Y (Scale)
-                        newT.values[i + 2] = 0.0;  // Z
+                // 2. Position Scaling (Use 0.01 to fix Air Chair but prevent Giant)
+                if (prop === 'position') {
+                    for (let i = 0; i < newT.values.length; i++) {
+                        newT.values[i] *= 0.01;
                     }
-                    tracks.push(newT);
-                } else if (prop === 'quaternion') {
-                    tracks.push(newT);
+                    scaledPositionTracks++;
                 }
+
+                // 3. Arm Freeze (Remove Arm/Hand/Shoulder tracks)
+                const nameLower = vrmNode.name.toLowerCase();
+                if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
+                    // Skip (Freeze)
+                    return;
+                }
+
+                // 4. Rotation Correction
+                if (prop === 'quaternion') {
+
+                    // CASE A: Hips (Body Turn) -> Y-180
+                    if (nameLower.includes('hips')) {
+                        const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); // Y-180
+                        for (let i = 0; i < newT.values.length; i += 4) {
+                            const qRaw = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
+                            qRaw.multiply(qPatch);
+                            newT.values[i + 1] = qRaw.y;
+                            newT.values[i + 2] = qRaw.z;
+                            newT.values[i + 3] = qRaw.w;
+                        }
+                    }
+                    // CASE B: Legs -> Animation Data Inversion Only (No Bone Rotation)
+                    else if (nameLower.includes('leg')) {
+                        // Invert X component for ALL leg tracks (Upper & Lower) to fix bend direction
+                        // This avoids twisting the bone axis while correcting the motion direction.
+                        for (let i = 0; i < newT.values.length; i += 4) {
+                            newT.values[i] *= -1.0;
+                        }
+                    }
+                }
+
+                tracks.push(newT);
             }
         }
     });
+
+    console.log("FIX: Removed Leg Bone Rotations. Applied Animation X-Invert to All Legs.");
 
     if (tracks.length > 0) {
         const newClip = new THREE.AnimationClip('FBXDance', clip.duration, tracks);
         const action = mixer.clipAction(newClip);
         action.play();
+        console.log("Animation Action Playing");
     }
 }
 
@@ -239,20 +326,12 @@ function onFaceResults(results) {
 
 function updateEye(lm) {
     const nose = lm[1];
-
-    // Sensitivity
     const scaleX = 8.0;
     const scaleY = 6.0;
-
-    // Calculate raw position from face
     let px = (nose.x - 0.5) * MONITOR_WIDTH * scaleX;
     let py = -(nose.y - 0.5) * (MONITOR_WIDTH / window.innerWidth * window.innerHeight) * scaleY;
-
-    // Add Height Offset for "Looking Down" feel
     py += 0.8;
-
-    const pz = 1.2; // Camera distance
-
+    const pz = 1.2;
     const target = new THREE.Vector3(px, py, pz);
     userEyePosition.lerp(target, 0.1);
 }
@@ -265,32 +344,39 @@ function updateExpr(lm) {
     currentVrm.expressionManager.setValue('blink_r', blink);
 }
 
-function updateCameraLogic() {
-    // 1. Move Camera with Head
-    camera.position.copy(userEyePosition);
-
-    // 2. Lock View on Model Center (Fixes "Out of Frame")
-    const target = new THREE.Vector3(0, -0.8 + 0.8, PROJECTION_DIST); // Look at chest/head height
-    camera.lookAt(target);
-
-    // 3. (Optional) Distortion removed for stability. 
-    // This creates "Parallax" (Moving camera) without "Off-Axis Skew".
-    // It's robust and prevents the glitch.
-}
-
 function animate() {
     requestAnimationFrame(animate);
+
     const d = clock.getDelta();
 
-    updateCameraLogic();
+    // Telemetry
+    if (frameCount < 1) {
+        console.log("First Frame Rendered");
+        frameCount++;
+    }
+
+    // 【カメラの安全位置】固定
+    camera.position.set(0, 1.5, 2.5);
+    camera.lookAt(0, 1.0, 0);
 
     if (currentVrm) {
         currentVrm.update(d);
-        currentVrm.scene.position.set(0, -0.8, PROJECTION_DIST);
-        currentVrm.scene.rotation.y = Math.PI + (userEyePosition.x * 0.3); // Interactive rotation
+        // Direct Scene Rotation interaction
+        currentVrm.scene.rotation.y = 0; // FIX: No global rotation
     }
 
+    // Animation ENABLED
     if (mixer) mixer.update(d);
+
+    // Equality Fix: Reset to origin every frame
+    if (currentVrm) {
+        currentVrm.scene.scale.set(1.0, 1.0, 1.0);
+        currentVrm.scene.position.set(0, 0, 0);
+    }
+
+    if (boxHelper) {
+        boxHelper.update();
+    }
 
     renderer.render(scene, camera);
 }
