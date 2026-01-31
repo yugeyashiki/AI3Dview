@@ -1,5 +1,5 @@
-console.log("FIX: ONLY Hips rotated 180. Global/Leg rotations REMOVED.");
-console.log("--- SCRIPT.JS LOADED (VERSION: HIPS_ONLY_FIX) ---");
+console.log("FIX: UpperLeg X-180 + Z-Invert. LowerLeg X+90 Only.");
+console.log("--- SCRIPT.JS LOADED (VERSION: UPPER_ZINV_LOWER_PLAIN) ---");
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
@@ -65,9 +65,9 @@ function init() {
     loadVRMAndFBX('./VRM/kamuro.vrm', './Motions/dance.fbx');
     setupFaceMesh();
 
-    // 【カメラ固定】 init最後で明示
-    camera.position.set(0, 1.5, 2.5);
-    camera.lookAt(0, 1.0, 0);
+    // 【カメラ固定】 全身・足元が見える位置に調整
+    camera.position.set(0, 1.2, 4.0);
+    camera.lookAt(0, 0.6, 0);
 
     animate();
 }
@@ -127,7 +127,7 @@ function loadVRMAndFBX(vrmUrl, fbxUrl) {
 
         // Force Reset Position/Rotation/Scale (Local to Scene)
         vrm.scene.position.set(0, 0, 0);
-        vrm.scene.rotation.y = 0; // Rotation Reset
+        vrm.scene.rotation.y = 0; // Rotation Reset (Back to 0)
         vrm.scene.scale.set(1, 1, 1);
 
         vrm.scene.traverse((obj) => {
@@ -251,6 +251,12 @@ function retargetFBX(clip) {
 
                 // 3. Arm Freeze (Remove Arm/Hand/Shoulder tracks)
                 const nameLower = vrmNode.name.toLowerCase();
+
+                // [DEBUG]
+                if (nameLower.includes('leg') || nameLower.includes('hips') || nameLower.includes('foot') || nameLower.includes('toe')) {
+                    console.log("Processing Track:", newT.name);
+                }
+
                 if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
                     // Skip (Freeze)
                     return;
@@ -261,21 +267,40 @@ function retargetFBX(clip) {
 
                     // CASE A: Hips (Body Turn) -> Y-180
                     if (nameLower.includes('hips')) {
+                        console.log(" -> Applied Hips Y-Fix");
                         const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); // Y-180
                         for (let i = 0; i < newT.values.length; i += 4) {
                             const qRaw = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
                             qRaw.multiply(qPatch);
+                            newT.values[i] = qRaw.x;
                             newT.values[i + 1] = qRaw.y;
                             newT.values[i + 2] = qRaw.z;
                             newT.values[i + 3] = qRaw.w;
                         }
                     }
-                    // CASE B: Legs -> Animation Data Inversion Only (No Bone Rotation)
-                    else if (nameLower.includes('leg')) {
-                        // Invert X component for ALL leg tracks (Upper & Lower) to fix bend direction
-                        // This avoids twisting the bone axis while correcting the motion direction.
+                    // CASE B: Legs/Feet -> Rotation Fixes
+                    else if (nameLower.includes('leg') || nameLower.includes('foot') || nameLower.includes('toe')) {
+                        let qFix = null;
+                        let isUpperLeg = false;
+
+                        if (nameLower.includes('up') || nameLower.includes('thigh')) {
+                            isUpperLeg = true;
+                            console.log(` -> UpperLeg (X-180 + Z-Inv): ${newT.name}`);
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+                        } else {
+                            console.log(` -> LowerLeg/Foot (X+90): ${newT.name}`);
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+                        }
+
                         for (let i = 0; i < newT.values.length; i += 4) {
-                            newT.values[i] *= -1.0;
+                            const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
+                            q.multiply(qFix);
+
+                            newT.values[i] = q.x;
+                            newT.values[i + 1] = q.y;
+                            // Z-Invert for UpperLeg ONLY
+                            newT.values[i + 2] = isUpperLeg ? (q.z * -1.0) : q.z;
+                            newT.values[i + 3] = q.w;
                         }
                     }
                 }
@@ -285,7 +310,7 @@ function retargetFBX(clip) {
         }
     });
 
-    console.log("FIX: Removed Leg Bone Rotations. Applied Animation X-Invert to All Legs.");
+    console.log("FIX: REVERTED to Bone Fix. Legs X-180 (Fix Direction), UpperLeg Z-Invert (Fix Cross).");
 
     if (tracks.length > 0) {
         const newClip = new THREE.AnimationClip('FBXDance', clip.duration, tracks);
@@ -362,13 +387,13 @@ function animate() {
     if (currentVrm) {
         currentVrm.update(d);
         // Direct Scene Rotation interaction
-        currentVrm.scene.rotation.y = 0; // FIX: No global rotation
+        currentVrm.scene.rotation.y = 0; // FIX: No global rotation (Back to 0)
     }
 
     // Animation ENABLED
     if (mixer) mixer.update(d);
 
-    // Equality Fix: Reset to origin every frame
+    // Equality Fix: Reset to origin every frame (Back to 0 for Debug)
     if (currentVrm) {
         currentVrm.scene.scale.set(1.0, 1.0, 1.0);
         currentVrm.scene.position.set(0, 0, 0);
