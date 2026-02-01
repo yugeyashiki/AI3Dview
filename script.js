@@ -1,5 +1,5 @@
-console.log("FIX: UpperLeg X-180 + Z-Invert. LowerLeg X+90 Only.");
-console.log("--- SCRIPT.JS LOADED (VERSION: UPPER_ZINV_LOWER_PLAIN) ---");
+console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90.");
+console.log("--- SCRIPT.JS LOADED (VERSION: Z_DATA_INVERT) ---");
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
@@ -66,8 +66,8 @@ function init() {
     setupFaceMesh();
 
     // 【カメラ固定】 全身・足元が見える位置に調整
-    camera.position.set(0, 1.2, 4.0);
-    camera.lookAt(0, 0.6, 0);
+    camera.position.set(0, 1.0, 6.0);
+    camera.lookAt(0, 0.5, 0);
 
     animate();
 }
@@ -231,7 +231,19 @@ function retargetFBX(clip) {
         // However, we need to check VRM mapping first.
 
         const base = t.name.split('.')[0].replace(/.*:/, '');
-        const vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base];
+        let vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base];
+
+        // --- LEFT/RIGHT SWAP for Legs/Feet ---
+        if (vrmName) {
+            if (vrmName === 'leftUpperLeg') vrmName = 'rightUpperLeg';
+            else if (vrmName === 'rightUpperLeg') vrmName = 'leftUpperLeg';
+            else if (vrmName === 'leftLowerLeg') vrmName = 'rightLowerLeg';
+            else if (vrmName === 'rightLowerLeg') vrmName = 'leftLowerLeg';
+            else if (vrmName === 'leftFoot') vrmName = 'rightFoot';
+            else if (vrmName === 'rightFoot') vrmName = 'leftFoot';
+            else if (vrmName === 'leftToes') vrmName = 'rightToes';
+            else if (vrmName === 'rightToes') vrmName = 'leftToes';
+        }
 
         if (vrmName) {
             const vrmNode = currentVrm.humanoid.getNormalizedBoneNode(vrmName);
@@ -282,13 +294,23 @@ function retargetFBX(clip) {
                     else if (nameLower.includes('leg') || nameLower.includes('foot') || nameLower.includes('toe')) {
                         let qFix = null;
                         let isUpperLeg = false;
+                        let isFoot = false;
 
                         if (nameLower.includes('up') || nameLower.includes('thigh')) {
                             isUpperLeg = true;
-                            console.log(` -> UpperLeg (X-180 + Z-Inv): ${newT.name}`);
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+                            // UpperLeg - X-180 + Y+180 to face forward
+                            console.log(` -> UpperLeg (X-180 + Y+180 + Z-Inv): ${newT.name}`);
+                            const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+                            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+                            qFix = qX.multiply(qY);
+                        } else if (nameLower.includes('foot') || nameLower.includes('toe')) {
+                            // Foot/Toe - X-90 only
+                            isFoot = true;
+                            console.log(` -> Foot/Toe (X-90): ${newT.name}`);
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
                         } else {
-                            console.log(` -> LowerLeg/Foot (X+90): ${newT.name}`);
+                            // LowerLeg - X+90 only
+                            console.log(` -> LowerLeg (X+90): ${newT.name}`);
                             qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
                         }
 
@@ -298,8 +320,8 @@ function retargetFBX(clip) {
 
                             newT.values[i] = q.x;
                             newT.values[i + 1] = q.y;
-                            // Z-Invert for UpperLeg ONLY
-                            newT.values[i + 2] = isUpperLeg ? (q.z * -1.0) : q.z;
+                            // Approach C: Z-Invert for ALL leg parts
+                            newT.values[i + 2] = q.z * -1.0;
                             newT.values[i + 3] = q.w;
                         }
                     }
@@ -310,7 +332,7 @@ function retargetFBX(clip) {
         }
     });
 
-    console.log("FIX: REVERTED to Bone Fix. Legs X-180 (Fix Direction), UpperLeg Z-Invert (Fix Cross).");
+    console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90.");
 
     if (tracks.length > 0) {
         const newClip = new THREE.AnimationClip('FBXDance', clip.duration, tracks);
@@ -380,9 +402,9 @@ function animate() {
         frameCount++;
     }
 
-    // 【カメラの安全位置】固定
-    camera.position.set(0, 1.5, 2.5);
-    camera.lookAt(0, 1.0, 0);
+    // 【カメラ】前から確認用アングル
+    camera.position.set(0, 1.0, 8.0);
+    camera.lookAt(0, 0.8, 0);
 
     if (currentVrm) {
         currentVrm.update(d);
