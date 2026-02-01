@@ -295,10 +295,11 @@ function retargetFBX(clip) {
                         let qFix = null;
                         let isUpperLeg = false;
                         let isFoot = false;
+                        let isLowerLeg = false;
 
                         if (nameLower.includes('up') || nameLower.includes('thigh')) {
                             isUpperLeg = true;
-                            // UpperLeg - X-180 + Y+180 to face forward
+                            // UpperLeg - X-180 + Y+180 (restored)
                             console.log(` -> UpperLeg (X-180 + Y+180 + Z-Inv): ${newT.name}`);
                             const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
                             const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
@@ -309,8 +310,9 @@ function retargetFBX(clip) {
                             console.log(` -> Foot/Toe (X-90): ${newT.name}`);
                             qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
                         } else {
-                            // LowerLeg - X+90 only
-                            console.log(` -> LowerLeg (X+90): ${newT.name}`);
+                            // LowerLeg - X+90 + X-Invert
+                            isLowerLeg = true;
+                            console.log(` -> LowerLeg (X+90 + X-Inv): ${newT.name}`);
                             qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
                         }
 
@@ -318,9 +320,11 @@ function retargetFBX(clip) {
                             const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
                             q.multiply(qFix);
 
-                            newT.values[i] = q.x;
-                            newT.values[i + 1] = q.y;
-                            // Approach C: Z-Invert for ALL leg parts
+                            // X-Invert for LowerLeg AND UpperLeg
+                            newT.values[i] = (isLowerLeg || isUpperLeg) ? (q.x * -1.0) : q.x;
+                            // Y-Invert for LowerLeg only
+                            newT.values[i + 1] = isLowerLeg ? (q.y * -1.0) : q.y;
+                            // Z-Invert for ALL leg parts
                             newT.values[i + 2] = q.z * -1.0;
                             newT.values[i + 3] = q.w;
                         }
