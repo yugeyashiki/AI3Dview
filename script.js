@@ -233,17 +233,17 @@ function retargetFBX(clip) {
         const base = t.name.split('.')[0].replace(/.*:/, '');
         let vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base];
 
-        // --- LEFT/RIGHT SWAP for Legs/Feet ---
-        if (vrmName) {
-            if (vrmName === 'leftUpperLeg') vrmName = 'rightUpperLeg';
-            else if (vrmName === 'rightUpperLeg') vrmName = 'leftUpperLeg';
-            else if (vrmName === 'leftLowerLeg') vrmName = 'rightLowerLeg';
-            else if (vrmName === 'rightLowerLeg') vrmName = 'leftLowerLeg';
-            else if (vrmName === 'leftFoot') vrmName = 'rightFoot';
-            else if (vrmName === 'rightFoot') vrmName = 'leftFoot';
-            else if (vrmName === 'leftToes') vrmName = 'rightToes';
-            else if (vrmName === 'rightToes') vrmName = 'leftToes';
-        }
+        // --- LEFT/RIGHT SWAP DISABLED ---
+        // if (vrmName) {
+        //     if (vrmName === 'leftUpperLeg') vrmName = 'rightUpperLeg';
+        //     else if (vrmName === 'rightUpperLeg') vrmName = 'leftUpperLeg';
+        //     else if (vrmName === 'leftLowerLeg') vrmName = 'rightLowerLeg';
+        //     else if (vrmName === 'rightLowerLeg') vrmName = 'leftLowerLeg';
+        //     else if (vrmName === 'leftFoot') vrmName = 'rightFoot';
+        //     else if (vrmName === 'rightFoot') vrmName = 'leftFoot';
+        //     else if (vrmName === 'leftToes') vrmName = 'rightToes';
+        //     else if (vrmName === 'rightToes') vrmName = 'leftToes';
+        // }
 
         if (vrmName) {
             const vrmNode = currentVrm.humanoid.getNormalizedBoneNode(vrmName);
