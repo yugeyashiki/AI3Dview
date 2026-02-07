@@ -50,12 +50,92 @@
             padding: 5px 10px;
             border: 2px solid red;
         }
+
+        /* 🆕 Phase 3: CSS Improvements */
+        /* エラーコンテナのスタイル改善 */
+        #error-container {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        #error-container h3 {
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        #error-container p {
+            line-height: 1.6;
+        }
+
+        /* カメラ同意UIのスタイル改善 */
+        #consent-box h2 {
+            margin: 0 0 20px 0;
+        }
+
+        #consent-box button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+            transition: all 0.2s ease;
+        }
+
+        #allow-camera:hover {
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        }
+
+        #deny-camera:hover {
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+        }
+
+        /* video-containerの改善 */
+        #video-container {
+            transition: transform 0.3s ease;
+        }
+
+        #video-container:hover {
+            transform: scale(1.05);
+        }
+
+        /* デバッグオーバーレイ */
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 
 <body>
-    <div id="video-container">
+    <div id="consent-overlay"
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div id="consent-box"
+            style="background: linear-gradient(135deg, #1e3a8a 0%, #1e293b 100%); color: #fff; padding: 40px; border-radius: 16px; max-width: 500px; text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);">
+            <h2 style="margin-bottom: 20px; font-size: 24px;">📹 カメラアクセスの許可</h2>
+            <p style="margin-bottom: 15px; line-height: 1.6; color: #cbd5e1;">
+                このアプリケーションは、あなたの表情をリアルタイムで3Dキャラクターに反映させるため、
+                ウェブカメラを使用します。
+            </p>
+            <p style="margin-bottom: 15px; line-height: 1.6; color: #cbd5e1;">
+                <strong style="color: #fbbf24;">🔒 プライバシー保護</strong><br>
+                収集された映像データは、お使いのデバイス内でのみ処理され、
+                外部サーバーへ送信されることは一切ありません。
+            </p>
+            <div style="margin-top: 30px; display: flex; gap: 15px; justify-content: center;">
+                <button id="allow-camera"
+                    style="padding: 12px 30px; font-size: 16px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer;">許可する</button>
+                <button id="deny-camera"
+                    style="padding: 12px 30px; font-size: 16px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer;">拒否する</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="video-container" style="display: none;">
         <video id="input_video" playsinline></video>
+    </div>
+
+    <!-- 🆕 エラー表示用のコンテナを追加 -->
+    <div id="error-container"
+        style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 0, 0, 0.9); color: white; padding: 30px; border-radius: 16px; z-index: 10000; max-width: 400px; text-align: center;">
+        <h3 id="error-title">エラーが発生しました</h3>
+        <p id="error-message"></p>
+        <button onclick="location.reload()"
+            style="margin-top: 15px; padding: 10px 20px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">再読み込み</button>
     </div>
 
     <div id="debug-overlay">BONE OFFSET: ACTIVE</div>

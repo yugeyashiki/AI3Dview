@@ -1,5 +1,4 @@
-console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90.");
-console.log("--- SCRIPT.JS LOADED (VERSION: Z_DATA_INVERT) ---");
+// 🆕 Phase 2: Debug Cleanup (Header logs removed)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
@@ -8,10 +7,56 @@ import { FaceMesh } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 
 // --- Configuration ---
-const MONITOR_WIDTH = 0.5;
-const ASPECT_RATIO = window.innerWidth / window.innerHeight;
-const DEFAULT_EYE_Z = 0.8;
-const PROJECTION_DIST = -8.0;
+// 🆕 Constants Object
+const CONFIG = {
+    // Display
+    MONITOR_WIDTH: 0.5,
+    ASPECT_RATIO: window.innerWidth / window.innerHeight,
+    DEFAULT_EYE_Z: 0.8,
+    PROJECTION_DIST: -8.0,
+
+    // 🆕 Camera Settings
+    CAMERA_FOV: 30,
+    CAMERA_NEAR: 0.1,
+    CAMERA_FAR: 1000.0,
+    CAMERA_POSITION: { x: 0, y: 1.0, z: 6.0 }, // 🆕 正面からの視点
+    CAMERA_LOOKAT: { x: 0, y: 0.5, z: 0 },
+
+    // 🆕 Animation
+    FBX_POSITION_SCALE: 0.01,  // Mixamo to VRM position scale factor
+
+    // 🆕 Face Tracking
+    EYE_SCALE_X: 8.0,          // Horizontal eye tracking sensitivity
+    EYE_SCALE_Y: 6.0,          // Vertical eye tracking sensitivity
+    EYE_OFFSET_Y: 0.8,         // Y-axis offset for head height
+    EYE_POS_Z: 1.2,            // Z-axis distance
+    LERP_SPEED: 0.1,           // Eye position interpolation speed
+    BLINK_THRESHOLD: 0.08,     // Blink detection threshold
+
+    // 🆕 Scene
+    BACKGROUND_COLOR: 0x000000,
+    LIGHT_INTENSITY: 1.0,
+    AMBIENT_INTENSITY: 0.5,
+
+    // 🆕 Bone Rotation Offsets (in radians)
+    ROTATION: {
+        HIPS_Y: Math.PI,        // 180 degrees
+        UPPER_LEG_X: Math.PI,   // 180 degrees
+        UPPER_LEG_Y: Math.PI,   // 180 degrees
+        LOWER_LEG_X: Math.PI / 2, // 90 degrees
+        FOOT_X: -Math.PI / 2    // -90 degrees
+    }
+};
+
+// 🆕 デバッグモード判定
+const DEBUG_MODE = new URLSearchParams(window.location.search).has('debug');
+
+// 🆕 デバッグログ関数
+function debugLog(...args) {
+    if (DEBUG_MODE) {
+        console.log('[DEBUG]', ...args);
+    }
+}
 
 // --- Globals ---
 let scene, camera, renderer;
@@ -23,58 +68,56 @@ let gridRoom = null;
 let vrmLoaded = false;
 let frameCount = 0;
 let renderLogDone = false;
-let boxHelper = null;
+let boxHelper = null; // 🆕 削除予定だが参照エラー防止のため一旦nullで残す
 let scaleLogDone = false;
+let skeletonHelper = null; // 🆕 グローバルに保持
 
 // --- MediaPipe ---
 let faceMesh;
 let cameraInput;
-let userEyePosition = new THREE.Vector3(0, 0, DEFAULT_EYE_Z);
+let userEyePosition = new THREE.Vector3(0, 0, CONFIG.DEFAULT_EYE_Z); // 🆕 CONFIG
 const videoElement = document.getElementById('input_video');
 
 // --- Init ---
-function init() {
-    // 1. Scene Creation
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+async function init() {
+    try {
+        // 1. Scene Creation
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(CONFIG.BACKGROUND_COLOR); // 🆕 CONFIG
 
-    // 【Lighting for Texture Recovery】
-    const light = new THREE.DirectionalLight(0xffffff, 1.0);
-    light.position.set(0, 1.0, 1.0);
-    scene.add(light);
+        // 【Lighting for Texture Recovery】
+        const light = new THREE.DirectionalLight(0xffffff, CONFIG.LIGHT_INTENSITY); // 🆕 CONFIG
+        light.position.set(0, 1.0, 1.0);
+        scene.add(light);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambient);
+        const ambient = new THREE.AmbientLight(0xffffff, CONFIG.AMBIENT_INTENSITY); // 🆕 CONFIG
+        scene.add(ambient);
 
-    // 【生存確認】赤いキューブ -> REMOVED
-    // const testGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-    // const testMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-    // const testMesh = new THREE.Mesh(testGeo, testMat);
-    // testMesh.position.set(0, 1.0, 0); // Head height
-    // scene.add(testMesh); // REMOVED
+        // console.log("Scene Initialized (Cleaned)"); // 🆕 Removed log
 
-    // 3. Diagnostic help at origin -> REMOVED
-    // const originAxes = new THREE.AxesHelper(10);
-    // scene.add(originAxes);
+        setupThreeJS();
+        setupRoom();
 
-    console.log("Scene Initialized (Cleaned)");
+        // 【カメラ固定】一度だけ設定
+        camera.position.set(CONFIG.CAMERA_POSITION.x, CONFIG.CAMERA_POSITION.y, CONFIG.CAMERA_POSITION.z); // 🆕 CONFIG
+        camera.lookAt(CONFIG.CAMERA_LOOKAT.x, CONFIG.CAMERA_LOOKAT.y, CONFIG.CAMERA_LOOKAT.z); // 🆕 CONFIG
 
-    setupThreeJS();
-    setupRoom();
+        // 🆕 非同期でVRM読み込み
+        await loadVRMAndFBXAsync('./VRM/kamuro.vrm', './Motions/Walking.fbx'); // 🆕 Walkingモーションでテスト
 
-    loadVRMAndFBX('./VRM/kamuro.vrm', './Motions/dance.fbx');
-    setupFaceMesh();
+        // 🆕 非同期でフェイストラッキング開始
+        await setupFaceMesh();
 
-    // 【カメラ固定】 全身・足元が見える位置に調整
-    camera.position.set(0, 1.0, 6.0);
-    camera.lookAt(0, 0.5, 0);
+        animate();
 
-    animate();
+    } catch (error) {
+        showError('アプリケーションの初期化に失敗しました: ' + error.message);
+    }
 }
 
 function setupThreeJS() {
     // Camera
-    camera = new THREE.PerspectiveCamera(30, ASPECT_RATIO, 0.1, 1000.0);
+    camera = new THREE.PerspectiveCamera(CONFIG.CAMERA_FOV, CONFIG.ASPECT_RATIO, CONFIG.CAMERA_NEAR, CONFIG.CAMERA_FAR); // 🆕 CONFIG
     camera.position.set(0, 0, 5); // Initial setup
     camera.updateProjectionMatrix();
 
@@ -115,57 +158,76 @@ function onWindowResize() {
 }
 
 // --- Loading ---
-function loadVRMAndFBX(vrmUrl, fbxUrl) {
-    const loader = new GLTFLoader();
-    loader.register((parser) => new VRMLoaderPlugin(parser));
+// --- Loading ---
+// 🆕 loadVRMAndFBXを非同期関数に変更
+async function loadVRMAndFBXAsync(vrmUrl, fbxUrl) {
+    return new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
 
-    loader.load(vrmUrl, (gltf) => {
-        const vrm = gltf.userData.vrm;
-        cleanupScene();
+        loader.load(vrmUrl, (gltf) => {
+            try {
+                const vrm = gltf.userData.vrm;
+                cleanupScene();
 
-        currentVrm = vrm;
+                currentVrm = vrm;
 
-        // Force Reset Position/Rotation/Scale (Local to Scene)
-        vrm.scene.position.set(0, 0, 0);
-        vrm.scene.rotation.y = 0; // Rotation Reset (Back to 0)
-        vrm.scene.scale.set(1, 1, 1);
+                // Force Reset Position/Rotation/Scale (Local to Scene)
+                vrm.scene.position.set(0, 0, 0);
+                vrm.scene.rotation.y = 0; // Rotation Reset (Back to 0)
+                vrm.scene.scale.set(1, 1, 1);
 
-        vrm.scene.traverse((obj) => {
-            if (obj.isMesh) {
-                obj.castShadow = true;
-                obj.receiveShadow = false;
+                vrm.scene.traverse((obj) => {
+                    if (obj.isMesh) {
+                        obj.castShadow = true;
+                        obj.receiveShadow = false;
 
-                // 【Render Guard】
-                obj.frustumCulled = false;
-                obj.renderOrder = 999;
+                        // 【Render Guard】
+                        obj.frustumCulled = false;
+                        obj.renderOrder = 999;
 
-                // MToon Material is kept securely.
-                // Re-enable skinning if needed? MToon handles it.
-                // We just ensure 'visible = true'
-                obj.visible = true;
+                        // MToon Material is kept securely.
+                        // Re-enable skinning if needed? MToon handles it.
+                        // We just ensure 'visible = true'
+                        obj.visible = true;
 
-                obj.layers.set(0);
+                        obj.layers.set(0);
+                    }
+                });
+
+                // 【EVIDENCE: DIRECT SCENE ADD】
+                scene.add(vrm.scene);
+
+                // 🆕 影用オブジェクトを非表示
+                vrm.scene.traverse((obj) => {
+                    if (obj.isMesh) {
+                        const nameLower = obj.name.toLowerCase();
+                        if (nameLower.includes('shadow') || nameLower.includes('aozame')) {
+                            obj.visible = false;
+                        }
+                    }
+                });
+
+                // 🆕 Skeleton helper removed for production
+
+                // console.log("VRM added directly to SCENE at (0,0,0). Textures RESTORED. Debug objects commented out, Skeleton Visible."); // 🆕 Removed log
+
+                mixer = new THREE.AnimationMixer(vrm.scene);
+
+                // FBX Loading ENABLED
+                loadFBX(fbxUrl);
+
+                resolve();
+
+            } catch (error) {
+                reject(error);
             }
+
+        }, undefined, (err) => {
+            console.error("VRM Error:", err);
+            reject(new Error('VRMの読み込みに失敗しました: ' + err.message));
         });
-
-        // 【EVIDENCE: DIRECT SCENE ADD】
-        scene.add(vrm.scene);
-
-        // Debug Helpers -> REMOVED
-        // boxHelper = new THREE.BoxHelper(vrm.scene, 0xffff00);
-        // scene.add(boxHelper);
-
-        const skeletonHelper = new THREE.SkeletonHelper(vrm.scene);
-        scene.add(skeletonHelper);
-
-        console.log("VRM added directly to SCENE at (0,0,0). Textures RESTORED. Debug objects commented out, Skeleton Visible.");
-
-        mixer = new THREE.AnimationMixer(vrm.scene);
-
-        // FBX Loading ENABLED
-        loadFBX(fbxUrl);
-
-    }, undefined, (err) => console.error("VRM Error:", err));
+    });
 }
 
 function cleanupScene() {
@@ -174,6 +236,9 @@ function cleanupScene() {
         VRMUtils.deepDispose(currentVrm.scene);
         currentVrm = null;
     }
+
+    // 🆕 スケルトンヘルパーのクリーンアップ（不要になったが互換性のため残す）
+
     if (mixer) {
         mixer.stopAllAction();
         mixer = null;
@@ -256,7 +321,7 @@ function retargetFBX(clip) {
                 // 2. Position Scaling (Use 0.01 to fix Air Chair but prevent Giant)
                 if (prop === 'position') {
                     for (let i = 0; i < newT.values.length; i++) {
-                        newT.values[i] *= 0.01;
+                        newT.values[i] *= CONFIG.FBX_POSITION_SCALE; // 🆕 CONFIG
                     }
                     scaledPositionTracks++;
                 }
@@ -266,21 +331,22 @@ function retargetFBX(clip) {
 
                 // [DEBUG]
                 if (nameLower.includes('leg') || nameLower.includes('hips') || nameLower.includes('foot') || nameLower.includes('toe')) {
-                    console.log("Processing Track:", newT.name);
+                    debugLog("Processing Track:", newT.name); // 🆕 debugLog に変更
                 }
 
-                if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
-                    // Skip (Freeze)
-                    return;
-                }
+                // 🆕 Arm Freeze REMOVED - arm animations now enabled
+                // if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
+                //     // Skip (Freeze)
+                //     return;
+                // }
 
                 // 4. Rotation Correction
                 if (prop === 'quaternion') {
 
                     // CASE A: Hips (Body Turn) -> Y-180
                     if (nameLower.includes('hips')) {
-                        console.log(" -> Applied Hips Y-Fix");
-                        const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI); // Y-180
+                        debugLog(" -> Applied Hips Y-Fix"); // 🆕 debugLog
+                        const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.HIPS_Y); // 🆕 CONFIG
                         for (let i = 0; i < newT.values.length; i += 4) {
                             const qRaw = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
                             qRaw.multiply(qPatch);
@@ -299,21 +365,21 @@ function retargetFBX(clip) {
 
                         if (nameLower.includes('up') || nameLower.includes('thigh')) {
                             isUpperLeg = true;
-                            // UpperLeg - X-180 + Y+180 (restored)
-                            console.log(` -> UpperLeg (X-180 + Y+180 + Z-Inv): ${newT.name}`);
-                            const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
-                            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+                            // 🆕 Final: UpperLeg - X-180 + Y+180 (straight legs + correct foot direction)
+                            debugLog(` -> UpperLeg (X-180 + Y+180 final): ${newT.name}`);
+                            const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.UPPER_LEG_X);
+                            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.UPPER_LEG_Y); // 🆕 Y+180度を追加
                             qFix = qX.multiply(qY);
                         } else if (nameLower.includes('foot') || nameLower.includes('toe')) {
-                            // Foot/Toe - X-90 only
+                            // 🆕 Restored: Foot/Toe - X-90 rotation
                             isFoot = true;
-                            console.log(` -> Foot/Toe (X-90): ${newT.name}`);
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+                            debugLog(` -> Foot/Toe (X-90 restored): ${newT.name}`);
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.FOOT_X);
                         } else {
                             // LowerLeg - X+90 + X-Invert
                             isLowerLeg = true;
-                            console.log(` -> LowerLeg (X+90 + X-Inv): ${newT.name}`);
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+                            debugLog(` -> LowerLeg (X+90 + X-Inv): ${newT.name}`); // 🆕 debugLog
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.LOWER_LEG_X); // 🆕 CONFIG
                         }
 
                         for (let i = 0; i < newT.values.length; i += 4) {
@@ -324,10 +390,37 @@ function retargetFBX(clip) {
                             newT.values[i] = (isLowerLeg || isUpperLeg) ? (q.x * -1.0) : q.x;
                             // Y-Invert for LowerLeg only
                             newT.values[i + 1] = isLowerLeg ? (q.y * -1.0) : q.y;
-                            // Z-Invert for ALL leg parts
-                            newT.values[i + 2] = q.z * -1.0;
+                            // 🆕 Z-Invert for LowerLeg only (Foot excluded to fix twisting)
+                            newT.values[i + 2] = isLowerLeg ? (q.z * -1.0) : q.z;
                             newT.values[i + 3] = q.w;
                         }
+                    }
+                    // 🆕 CASE C: Arms -> Rotation Fixes
+                    else if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
+                        debugLog(`[ARM DEBUG] Processing arm track: ${newT.name}`);
+
+                        let qFix = null;
+                        let isUpperArm = nameLower.includes('up') || (nameLower.includes('arm') && !nameLower.includes('fore') && !nameLower.includes('lower'));
+                        let isLeftArm = nameLower.includes('left') || nameLower.includes('_l');
+
+                        if (isUpperArm) {
+                            // 🆕 左右判定を修正: 名前の末尾で判断
+                            const isLeftArmFixed = nameLower.endsWith('arml') || nameLower.includes('left');
+                            // 🆕 両腕が下がるように: 左はY+90、右はY-90
+                            const yAngle = isLeftArmFixed ? Math.PI / 2 : -Math.PI / 2;
+                            debugLog(` -> UpperArm (${isLeftArmFixed ? 'Left Y+90' : 'Right Y-90'}): ${newT.name}`);
+                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yAngle);
+
+                            for (let i = 0; i < newT.values.length; i += 4) {
+                                const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
+                                q.premultiply(qFix); // 🆕 premultiply に変更
+                                newT.values[i] = q.x;
+                                newT.values[i + 1] = q.y;
+                                newT.values[i + 2] = q.z;
+                                newT.values[i + 3] = q.w;
+                            }
+                        }
+                        // LowerArm/Hand/Shoulder - no rotation correction
                     }
                 }
 
@@ -336,36 +429,99 @@ function retargetFBX(clip) {
         }
     });
 
-    console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90.");
+    // console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90."); // 🆕 Removed log
 
     if (tracks.length > 0) {
         const newClip = new THREE.AnimationClip('FBXDance', clip.duration, tracks);
         const action = mixer.clipAction(newClip);
         action.play();
-        console.log("Animation Action Playing");
+        // console.log("Animation Action Playing"); // 🆕 Removed log
     }
 }
 
 // --- Face & OffAxis ---
-function setupFaceMesh() {
-    const video = document.getElementById('input_video');
-    if (!video) return;
+// 🆕 カメラ権限取得関数を追加
+async function requestCameraPermission() {
+    return new Promise((resolve, reject) => {
+        const consentOverlay = document.getElementById('consent-overlay');
+        const allowButton = document.getElementById('allow-camera');
+        const denyButton = document.getElementById('deny-camera');
 
-    faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
-    faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-    faceMesh.onResults(onFaceResults);
+        if (!consentOverlay || !allowButton || !denyButton) {
+            console.warn('Consent UI not found');
+            resolve();
+            return;
+        }
 
-    cameraInput = new Camera(video, {
-        onFrame: async () => await faceMesh.send({ image: video }),
-        width: 640,
-        height: 480
+        allowButton.onclick = () => {
+            consentOverlay.style.display = 'none';
+            resolve();
+        };
+
+        denyButton.onclick = () => {
+            consentOverlay.style.display = 'none';
+            reject(new Error('ユーザーがカメラアクセスを拒否しました'));
+        };
     });
-    cameraInput.start();
+}
+
+// 🆕 エラー表示関数を追加
+function showError(message) {
+    const errorContainer = document.getElementById('error-container');
+    const errorMessage = document.getElementById('error-message');
+
+    if (errorContainer && errorMessage) {
+        errorMessage.textContent = message;
+        errorContainer.style.display = 'block';
+    }
+
+    console.error('[ERROR]', message);
+}
+async function setupFaceMesh() {
+    try {
+        // 🆕 カメラ権限を取得
+        await requestCameraPermission();
+
+        const video = document.getElementById('input_video');
+        if (!video) {
+            throw new Error('Video element not found');
+        }
+
+        faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        faceMesh.onResults(onFaceResults);
+
+        cameraInput = new Camera(video, {
+            onFrame: async () => {
+                try {
+                    await faceMesh.send({ image: video });
+                } catch (error) {
+                    console.error('Face mesh processing error:', error);
+                }
+            },
+            width: 640,
+            height: 480
+        });
+
+        // 🆕 カメラ起動エラーをキャッチ
+        await cameraInput.start();
+
+        // 🆕 成功したらビデオコンテナを表示
+        const videoContainer = document.getElementById('video-container');
+        if (videoContainer) {
+            videoContainer.style.display = 'block';
+        }
+
+        console.log('Face tracking started successfully');
+
+    } catch (error) {
+        showError('カメラの起動に失敗しました。ブラウザの設定でカメラ権限を確認してください。');
+    }
 }
 
 function onFaceResults(results) {
@@ -377,20 +533,20 @@ function onFaceResults(results) {
 
 function updateEye(lm) {
     const nose = lm[1];
-    const scaleX = 8.0;
-    const scaleY = 6.0;
-    let px = (nose.x - 0.5) * MONITOR_WIDTH * scaleX;
-    let py = -(nose.y - 0.5) * (MONITOR_WIDTH / window.innerWidth * window.innerHeight) * scaleY;
-    py += 0.8;
-    const pz = 1.2;
+    const scaleX = CONFIG.EYE_SCALE_X; // 🆕 CONFIG
+    const scaleY = CONFIG.EYE_SCALE_Y; // 🆕 CONFIG
+    let px = (nose.x - 0.5) * CONFIG.MONITOR_WIDTH * scaleX;
+    let py = -(nose.y - 0.5) * (CONFIG.MONITOR_WIDTH / window.innerWidth * window.innerHeight) * scaleY;
+    py += CONFIG.EYE_OFFSET_Y; // 🆕 CONFIG
+    const pz = CONFIG.EYE_POS_Z; // 🆕 CONFIG
     const target = new THREE.Vector3(px, py, pz);
-    userEyePosition.lerp(target, 0.1);
+    userEyePosition.lerp(target, CONFIG.LERP_SPEED); // 🆕 CONFIG
 }
 
 function updateExpr(lm) {
     if (!currentVrm) return;
     const leftOpen = (lm[159].y - lm[145].y) / (lm[33].x - lm[133].x);
-    const blink = Math.abs(leftOpen) < 0.08 ? 1.0 : 0.0;
+    const blink = Math.abs(leftOpen) < CONFIG.BLINK_THRESHOLD ? 1.0 : 0.0; // 🆕 CONFIG
     currentVrm.expressionManager.setValue('blink_l', blink);
     currentVrm.expressionManager.setValue('blink_r', blink);
 }
@@ -398,37 +554,34 @@ function updateExpr(lm) {
 function animate() {
     requestAnimationFrame(animate);
 
-    const d = clock.getDelta();
+    const delta = clock.getDelta();
 
     // Telemetry
     if (frameCount < 1) {
-        console.log("First Frame Rendered");
+        // console.log("First Frame Rendered"); // 🆕 Removed log
         frameCount++;
     }
 
-    // 【カメラ】前から確認用アングル
-    camera.position.set(0, 1.0, 8.0);
-    camera.lookAt(0, 0.8, 0);
-
+    // VRM更新
     if (currentVrm) {
-        currentVrm.update(d);
-        // Direct Scene Rotation interaction
-        currentVrm.scene.rotation.y = 0; // FIX: No global rotation (Back to 0)
+        currentVrm.update(delta);
     }
 
-    // Animation ENABLED
-    if (mixer) mixer.update(d);
-
-    // Equality Fix: Reset to origin every frame (Back to 0 for Debug)
-    if (currentVrm) {
-        currentVrm.scene.scale.set(1.0, 1.0, 1.0);
-        currentVrm.scene.position.set(0, 0, 0);
+    // アニメーション更新
+    if (mixer) {
+        mixer.update(delta);
     }
 
-    if (boxHelper) {
-        boxHelper.update();
+    // 🆕 カメラ位置を顔の動きに追従
+    if (currentVrm && userEyePosition) {
+        const sensitivity = 2.0;
+        camera.position.x = userEyePosition.x * sensitivity;
+        camera.position.y = userEyePosition.y * sensitivity + CONFIG.CAMERA_POSITION.y;
+        camera.position.z = CONFIG.CAMERA_POSITION.z;
+        camera.lookAt(CONFIG.CAMERA_LOOKAT.x, CONFIG.CAMERA_LOOKAT.y, CONFIG.CAMERA_LOOKAT.z);
     }
 
+    // レンダリング
     renderer.render(scene, camera);
 }
 
