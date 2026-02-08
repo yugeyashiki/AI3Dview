@@ -58,6 +58,83 @@ function debugLog(...args) {
     }
 }
 
+// 🔍 前髪シャドウ問題調査用デバッグ関数
+function debugBangsMeshes(vrm) {
+    console.log('=== 🔍 BANGS DEBUG START ===');
+
+    // 1. 全メッシュの一覧とマテリアル情報
+    console.log('\n📦 [1] All Meshes in VRM:');
+    vrm.scene.traverse((obj) => {
+        if (obj.isMesh) {
+            const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+            const materialInfo = materials.map((mat, idx) => {
+                const sideNames = { 0: 'FrontSide', 1: 'BackSide', 2: 'DoubleSide' };
+                return `[${idx}] ${mat.name || 'unnamed'} (side=${sideNames[mat.side] || mat.side}, transparent=${mat.transparent})`;
+            }).join(', ');
+
+            console.log(`  ${obj.visible ? '✅' : '❌'} ${obj.name} | Materials: ${materialInfo}`);
+        }
+    });
+
+    // 2. 前髪関連メッシュの詳細
+    console.log('\n💇 [2] Bangs-related Meshes (前髪/bangs/hair):');
+    vrm.scene.traverse((obj) => {
+        if (obj.isMesh) {
+            const nameLower = obj.name.toLowerCase();
+            if (nameLower.includes('前髪') || nameLower.includes('bangs') || nameLower.includes('hair') || nameLower.includes('kami')) {
+                console.log(`  📍 ${obj.name}:`);
+                console.log(`     visible: ${obj.visible}`);
+                console.log(`     renderOrder: ${obj.renderOrder}`);
+                console.log(`     frustumCulled: ${obj.frustumCulled}`);
+
+                const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+                materials.forEach((mat, idx) => {
+                    console.log(`     Material[${idx}]: ${mat.name || 'unnamed'}`);
+                    console.log(`       - side: ${mat.side} (0=Front, 1=Back, 2=Double)`);
+                    console.log(`       - transparent: ${mat.transparent}`);
+                    console.log(`       - alphaTest: ${mat.alphaTest}`);
+                    console.log(`       - depthWrite: ${mat.depthWrite}`);
+                    console.log(`       - depthTest: ${mat.depthTest}`);
+                    if (mat.isMToonMaterial) {
+                        console.log(`       - [MToon] shadeColor: ${mat.shadeColor?.getHexString()}`);
+                        console.log(`       - [MToon] outlineWidth: ${mat.outlineWidthFactor || mat.outlineWidth}`);
+                    }
+                });
+            }
+        }
+    });
+
+    // 3. Spring Bone 情報
+    console.log('\n🌸 [3] Spring Bone Info:');
+    if (vrm.springBoneManager) {
+        const joints = vrm.springBoneManager.joints || [];
+        console.log(`  Total joints: ${joints.length}`);
+
+        // 前髪関連のボーンを抽出
+        joints.forEach((joint, idx) => {
+            const boneName = joint.bone?.name || 'unknown';
+            if (boneName.toLowerCase().includes('前髪') || boneName.toLowerCase().includes('bangs') || boneName.toLowerCase().includes('hair')) {
+                console.log(`  🔗 [${idx}] ${boneName}`);
+            }
+        });
+    } else {
+        console.log('  No Spring Bone Manager found');
+    }
+
+    // 4. 影/シャドウ関連メッシュ
+    console.log('\n🌑 [4] Shadow-related Meshes:');
+    vrm.scene.traverse((obj) => {
+        if (obj.isMesh) {
+            const nameLower = obj.name.toLowerCase();
+            if (nameLower.includes('shadow') || nameLower.includes('kage') || nameLower.includes('影') || nameLower.includes('aozame')) {
+                console.log(`  🔍 ${obj.name} (visible: ${obj.visible})`);
+            }
+        }
+    });
+
+    console.log('\n=== 🔍 BANGS DEBUG END ===');
+}
+
 // --- Globals ---
 let scene, camera, renderer;
 let currentVrm = null;
@@ -103,7 +180,7 @@ async function init() {
         camera.lookAt(CONFIG.CAMERA_LOOKAT.x, CONFIG.CAMERA_LOOKAT.y, CONFIG.CAMERA_LOOKAT.z); // 🆕 CONFIG
 
         // 🆕 非同期でVRM読み込み
-        await loadVRMAndFBXAsync('./VRM/kamuro.vrm', './Motions/Walking.fbx'); // 🆕 Walkingモーションでテスト
+        await loadVRMAndFBXAsync('./VRM/kamuro_1.vrm', './Motions/Walking.fbx'); // 🔧 Walkingモーション
 
         // 🆕 非同期でフェイストラッキング開始
         await setupFaceMesh();
@@ -134,21 +211,38 @@ function setupThreeJS() {
 
 function setupRoom() {
     gridRoom = new THREE.Group();
-    // Floor
-    const planeGeo = new THREE.PlaneGeometry(50, 50);
-    const planeMat = new THREE.ShadowMaterial({ opacity: 0.5, color: 0x000000 });
-    const floorMesh = new THREE.Mesh(planeGeo, planeMat);
-    floorMesh.rotation.x = -Math.PI / 2;
-    floorMesh.position.y = -0.8;
-    floorMesh.receiveShadow = true;
-    gridRoom.add(floorMesh);
 
-    // Grid 
+    // === 🎭 シンプルなステージ背景 ===
+
+    // 1. 床面 - 暗い色の床（MeshBasicMaterial = 照明不要）
+    const floorGeo = new THREE.PlaneGeometry(50, 50);
+    const floorMat = new THREE.MeshBasicMaterial({
+        color: 0x1a1a2e,  // 暗い紺色
+        transparent: true,
+        opacity: 0.9
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.81;  // グリッドの少し下
+    gridRoom.add(floor);
+
+    // 2. 背景壁 - グラデーション風（MeshBasicMaterial = 照明不要）
+    const wallGeo = new THREE.PlaneGeometry(60, 30);
+    const wallMat = new THREE.MeshBasicMaterial({
+        color: 0x16213e   // 濃い青
+    });
+    const wall = new THREE.Mesh(wallGeo, wallMat);
+    wall.position.set(0, 10, -15);  // 背景に配置
+    gridRoom.add(wall);
+
+    // 3. グリッド（デバッグ用、プロモーション時は非表示にできる）
     const grid = new THREE.GridHelper(20, 40, 0x00aa00, 0x002200);
-    grid.position.set(0, -0.801, -5.0);
+    grid.position.set(0, -0.8, -5.0);
+    grid.visible = false;  // グリッド非表示（プロモーションモード）
     gridRoom.add(grid);
 
     scene.add(gridRoom);
+    console.log('🎭 Stage setup complete (safe mode)');
 }
 
 function onWindowResize() {
@@ -208,9 +302,12 @@ async function loadVRMAndFBXAsync(vrmUrl, fbxUrl) {
                     }
                 });
 
+                // 🔧 前髪グレー影問題: 調査中（修正は一時的に削除）
+
                 // 🆕 Skeleton helper removed for production
 
-                // console.log("VRM added directly to SCENE at (0,0,0). Textures RESTORED. Debug objects commented out, Skeleton Visible."); // 🆕 Removed log
+                // 🔍 前髪シャドウ問題デバッグ
+                debugBangsMeshes(vrm);
 
                 mixer = new THREE.AnimationMixer(vrm.scene);
 
