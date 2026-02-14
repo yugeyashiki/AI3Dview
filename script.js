@@ -143,6 +143,7 @@ let clock = new THREE.Clock();
 let gridRoom = null;
 // hologramStage removed entirely
 let vrmLoaded = false;
+
 let frameCount = 0;
 let renderLogDone = false;
 let boxHelper = null; // 🆕 削除予定だが参照エラー防止のため一旦nullで残す
@@ -180,7 +181,7 @@ async function init() {
         camera.lookAt(CONFIG.CAMERA_LOOKAT.x, CONFIG.CAMERA_LOOKAT.y, CONFIG.CAMERA_LOOKAT.z); // 🆕 CONFIG
 
         // 🆕 非同期でVRM読み込み
-        await loadVRMAndFBXAsync('./VRM/kamuro_1.vrm', './Motions/Walking.fbx'); // 🔧 Walkingモーション
+        await loadVRMAndFBXAsync('./VRM/kamuro_1.vrm', './Motions/Walking.fbx');
 
         // 🆕 非同期でフェイストラッキング開始
         await setupFaceMesh();
@@ -348,9 +349,41 @@ function cleanupScene() {
 function loadFBX(url) {
     const loader = new FBXLoader();
     loader.load(url, (fbx) => {
+        console.log('=== 🎬 FBX DIAGNOSTIC START ===');
+        console.log(`FBX URL: ${url}`);
+        console.log(`Animation count: ${fbx.animations.length}`);
         if (fbx.animations.length > 0) {
-            retargetFBX(fbx.animations[0]);
+            const clip = fbx.animations[0];
+            console.log(`Clip name: ${clip.name}, duration: ${clip.duration}s, tracks: ${clip.tracks.length}`);
+
+            // Show all track names to diagnose bone naming
+            const boneNames = new Set();
+            clip.tracks.forEach(t => {
+                const base = t.name.split('.')[0].replace(/.*:/, '');
+                const prop = t.name.split('.').pop();
+                boneNames.add(base);
+            });
+            console.log('📦 All bone names in FBX:', [...boneNames].sort());
+
+            // Check which ones match mixamoMap
+            const matched = [];
+            const unmatched = [];
+            boneNames.forEach(name => {
+                const vrmBone = mixamoMap[name] || mixamoMap['mixamorig' + name];
+                if (vrmBone) {
+                    matched.push(`${name} -> ${vrmBone}`);
+                } else {
+                    unmatched.push(name);
+                }
+            });
+            console.log('✅ Matched bones:', matched);
+            console.log('❌ Unmatched bones:', unmatched);
+
+            retargetFBX(clip);
+        } else {
+            console.warn('⚠️ No animations found in FBX file!');
         }
+        console.log('=== 🎬 FBX DIAGNOSTIC END ===');
     }, undefined, (err) => console.warn("FBX Error:", err));
 }
 
@@ -377,6 +410,8 @@ const mixamoMap = {
     'mixamorigRightFoot': 'rightFoot', 'RightFoot': 'rightFoot'
 };
 
+
+
 // --- Retargeting with Safeguards ---
 // --- Retargeting with Safeguards ---
 function retargetFBX(clip) {
@@ -388,24 +423,8 @@ function retargetFBX(clip) {
         if (!t.name) return;
 
         const prop = t.name.split('.').pop();
-
-        // 1. Position handling: We no longer delete, but we must map normally.
-        // However, we need to check VRM mapping first.
-
         const base = t.name.split('.')[0].replace(/.*:/, '');
-        let vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base];
-
-        // --- LEFT/RIGHT SWAP DISABLED ---
-        // if (vrmName) {
-        //     if (vrmName === 'leftUpperLeg') vrmName = 'rightUpperLeg';
-        //     else if (vrmName === 'rightUpperLeg') vrmName = 'leftUpperLeg';
-        //     else if (vrmName === 'leftLowerLeg') vrmName = 'rightLowerLeg';
-        //     else if (vrmName === 'rightLowerLeg') vrmName = 'leftLowerLeg';
-        //     else if (vrmName === 'leftFoot') vrmName = 'rightFoot';
-        //     else if (vrmName === 'rightFoot') vrmName = 'leftFoot';
-        //     else if (vrmName === 'leftToes') vrmName = 'rightToes';
-        //     else if (vrmName === 'rightToes') vrmName = 'leftToes';
-        // }
+        let vrmName = mixamoMap[base] || mixamoMap['mixamorig' + base] || null;
 
         if (vrmName) {
             const vrmNode = currentVrm.humanoid.getNormalizedBoneNode(vrmName);
@@ -415,109 +434,89 @@ function retargetFBX(clip) {
                 const newT = t.clone();
                 newT.name = vrmNode.name + '.' + prop;
 
-                // 2. Position Scaling (Use 0.01 to fix Air Chair but prevent Giant)
+                // Position Scaling
                 if (prop === 'position') {
                     for (let i = 0; i < newT.values.length; i++) {
-                        newT.values[i] *= CONFIG.FBX_POSITION_SCALE; // 🆕 CONFIG
+                        newT.values[i] *= CONFIG.FBX_POSITION_SCALE;
                     }
                     scaledPositionTracks++;
                 }
 
-                // 3. Arm Freeze (Remove Arm/Hand/Shoulder tracks)
-                const nameLower = vrmNode.name.toLowerCase();
-
-                // [DEBUG]
-                if (nameLower.includes('leg') || nameLower.includes('hips') || nameLower.includes('foot') || nameLower.includes('toe')) {
-                    debugLog("Processing Track:", newT.name); // 🆕 debugLog に変更
-                }
-
-                // 🆕 Arm Freeze REMOVED - arm animations now enabled
-                // if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
-                //     // Skip (Freeze)
-                //     return;
-                // }
-
-                // 4. Rotation Correction
+                // Rotation Correction
                 if (prop === 'quaternion') {
+                    const nameLower = vrmNode.name.toLowerCase();
 
-                    // CASE A: Hips (Body Turn) -> Y-180
-                    if (nameLower.includes('hips')) {
-                        debugLog(" -> Applied Hips Y-Fix"); // 🆕 debugLog
-                        const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.HIPS_Y); // 🆕 CONFIG
-                        for (let i = 0; i < newT.values.length; i += 4) {
-                            const qRaw = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
-                            qRaw.multiply(qPatch);
-                            newT.values[i] = qRaw.x;
-                            newT.values[i + 1] = qRaw.y;
-                            newT.values[i + 2] = qRaw.z;
-                            newT.values[i + 3] = qRaw.w;
+                    {
+                        // ========== Mixamo Rotation Corrections ==========
+
+                        // CASE A: Hips (Body Turn) -> Y-180
+                        if (nameLower.includes('hips')) {
+                            debugLog(" -> Applied Hips Y-Fix");
+                            const qPatch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.HIPS_Y);
+                            for (let i = 0; i < newT.values.length; i += 4) {
+                                const qRaw = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
+                                qRaw.multiply(qPatch);
+                                newT.values[i] = qRaw.x;
+                                newT.values[i + 1] = qRaw.y;
+                                newT.values[i + 2] = qRaw.z;
+                                newT.values[i + 3] = qRaw.w;
+                            }
                         }
-                    }
-                    // CASE B: Legs/Feet -> Rotation Fixes
-                    else if (nameLower.includes('leg') || nameLower.includes('foot') || nameLower.includes('toe')) {
-                        let qFix = null;
-                        let isUpperLeg = false;
-                        let isFoot = false;
-                        let isLowerLeg = false;
+                        // CASE B: Legs/Feet -> Rotation Fixes
+                        else if (nameLower.includes('leg') || nameLower.includes('foot') || nameLower.includes('toe')) {
+                            let qFix = null;
+                            let isUpperLeg = false;
+                            let isFoot = false;
+                            let isLowerLeg = false;
 
-                        if (nameLower.includes('up') || nameLower.includes('thigh')) {
-                            isUpperLeg = true;
-                            // 🆕 Final: UpperLeg - X-180 + Y+180 (straight legs + correct foot direction)
-                            debugLog(` -> UpperLeg (X-180 + Y+180 final): ${newT.name}`);
-                            const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.UPPER_LEG_X);
-                            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.UPPER_LEG_Y); // 🆕 Y+180度を追加
-                            qFix = qX.multiply(qY);
-                        } else if (nameLower.includes('foot') || nameLower.includes('toe')) {
-                            // 🆕 Restored: Foot/Toe - X-90 rotation
-                            isFoot = true;
-                            debugLog(` -> Foot/Toe (X-90 restored): ${newT.name}`);
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.FOOT_X);
-                        } else {
-                            // LowerLeg - X+90 + X-Invert
-                            isLowerLeg = true;
-                            debugLog(` -> LowerLeg (X+90 + X-Inv): ${newT.name}`); // 🆕 debugLog
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.LOWER_LEG_X); // 🆕 CONFIG
-                        }
-
-                        for (let i = 0; i < newT.values.length; i += 4) {
-                            const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
-                            q.multiply(qFix);
-
-                            // X-Invert for LowerLeg AND UpperLeg
-                            newT.values[i] = (isLowerLeg || isUpperLeg) ? (q.x * -1.0) : q.x;
-                            // Y-Invert for LowerLeg only
-                            newT.values[i + 1] = isLowerLeg ? (q.y * -1.0) : q.y;
-                            // 🆕 Z-Invert for LowerLeg only (Foot excluded to fix twisting)
-                            newT.values[i + 2] = isLowerLeg ? (q.z * -1.0) : q.z;
-                            newT.values[i + 3] = q.w;
-                        }
-                    }
-                    // 🆕 CASE C: Arms -> Rotation Fixes
-                    else if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
-                        debugLog(`[ARM DEBUG] Processing arm track: ${newT.name}`);
-
-                        let qFix = null;
-                        let isUpperArm = nameLower.includes('up') || (nameLower.includes('arm') && !nameLower.includes('fore') && !nameLower.includes('lower'));
-                        let isLeftArm = nameLower.includes('left') || nameLower.includes('_l');
-
-                        if (isUpperArm) {
-                            // 🆕 左右判定を修正: 名前の末尾で判断
-                            const isLeftArmFixed = nameLower.endsWith('arml') || nameLower.includes('left');
-                            // 🆕 両腕が下がるように: 左はY+90、右はY-90
-                            const yAngle = isLeftArmFixed ? Math.PI / 2 : -Math.PI / 2;
-                            debugLog(` -> UpperArm (${isLeftArmFixed ? 'Left Y+90' : 'Right Y-90'}): ${newT.name}`);
-                            qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yAngle);
+                            if (nameLower.includes('up') || nameLower.includes('thigh')) {
+                                isUpperLeg = true;
+                                debugLog(` -> UpperLeg (X-180 + Y+180 final): ${newT.name}`);
+                                const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.UPPER_LEG_X);
+                                const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), CONFIG.ROTATION.UPPER_LEG_Y);
+                                qFix = qX.multiply(qY);
+                            } else if (nameLower.includes('foot') || nameLower.includes('toe')) {
+                                isFoot = true;
+                                debugLog(` -> Foot/Toe (X-90 restored): ${newT.name}`);
+                                qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.FOOT_X);
+                            } else {
+                                isLowerLeg = true;
+                                debugLog(` -> LowerLeg (X+90 + X-Inv): ${newT.name}`);
+                                qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), CONFIG.ROTATION.LOWER_LEG_X);
+                            }
 
                             for (let i = 0; i < newT.values.length; i += 4) {
                                 const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
-                                q.premultiply(qFix); // 🆕 premultiply に変更
-                                newT.values[i] = q.x;
-                                newT.values[i + 1] = q.y;
-                                newT.values[i + 2] = q.z;
+                                q.multiply(qFix);
+                                newT.values[i] = (isLowerLeg || isUpperLeg) ? (q.x * -1.0) : q.x;
+                                newT.values[i + 1] = isLowerLeg ? (q.y * -1.0) : q.y;
+                                newT.values[i + 2] = isLowerLeg ? (q.z * -1.0) : q.z;
                                 newT.values[i + 3] = q.w;
                             }
                         }
-                        // LowerArm/Hand/Shoulder - no rotation correction
+                        // CASE C: Arms -> Rotation Fixes
+                        else if (nameLower.includes('arm') || nameLower.includes('hand') || nameLower.includes('shoulder')) {
+                            debugLog(`[ARM DEBUG] Processing arm track: ${newT.name}`);
+
+                            let qFix = null;
+                            let isUpperArm = nameLower.includes('up') || (nameLower.includes('arm') && !nameLower.includes('fore') && !nameLower.includes('lower'));
+
+                            if (isUpperArm) {
+                                const isLeftArmFixed = nameLower.endsWith('arml') || nameLower.includes('left');
+                                const yAngle = isLeftArmFixed ? Math.PI / 2 : -Math.PI / 2;
+                                debugLog(` -> UpperArm (${isLeftArmFixed ? 'Left Y+90' : 'Right Y-90'}): ${newT.name}`);
+                                qFix = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yAngle);
+
+                                for (let i = 0; i < newT.values.length; i += 4) {
+                                    const q = new THREE.Quaternion(newT.values[i], newT.values[i + 1], newT.values[i + 2], newT.values[i + 3]);
+                                    q.premultiply(qFix);
+                                    newT.values[i] = q.x;
+                                    newT.values[i + 1] = q.y;
+                                    newT.values[i + 2] = q.z;
+                                    newT.values[i + 3] = q.w;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -528,11 +527,14 @@ function retargetFBX(clip) {
 
     // console.log("FIX: RESET Y-offsets. Applied UpperLegs X-180 + Z-Data Invert. LowerLegs X+90."); // 🆕 Removed log
 
+    console.log(`🎯 Retarget result: ${tracks.length} tracks created from ${clip.tracks.length} original tracks`);
     if (tracks.length > 0) {
         const newClip = new THREE.AnimationClip('FBXDance', clip.duration, tracks);
         const action = mixer.clipAction(newClip);
         action.play();
-        // console.log("Animation Action Playing"); // 🆕 Removed log
+        console.log(`✅ Animation playing: ${tracks.length} tracks, duration: ${clip.duration}s`);
+    } else {
+        console.warn('⚠️ No tracks were retargeted! Animation will NOT play.');
     }
 }
 
@@ -668,6 +670,8 @@ function animate() {
     if (mixer) {
         mixer.update(delta);
     }
+
+
 
     // 🆕 カメラ位置を顔の動きに追従
     if (currentVrm && userEyePosition) {
